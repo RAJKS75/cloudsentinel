@@ -134,3 +134,106 @@ az webapp deployment source config-zip \
   --name cloudsentinel-cspm \
   --resource-group rg-cloudsentinel \
   --src ../cloudsentinel-deploy.zip
+
+# Step 3: Configure Startup Command
+
+ By default, App Service looks for a Node.js server. Since this is a static site, override it:
+ az webapp config set \
+  --name cloudsentinel-cspm \
+  --resource-group rg-cloudsentinel \
+  --startup-file "npx serve -s . -l 8080"
+
+By default, App Service looks for a Node.js server. Since this is a static site, override it:
+az webapp config set \
+  --name cloudsentinel-cspm \
+  --resource-group rg-cloudsentinel \
+  --startup-file "npx serve -s . -l 8080"
+
+  Or set via portal: Configuration → General Settings → Startup Command → npx serve -s . -l 8080
+
+# Step 4: Enable HTTPS (Auto-enabled on App Service)
+App Service provides a *.azurewebsites.net SSL cert automatically. For custom domains:
+# Add custom domain (you need DNS control first)
+az webapp config hostname add \
+  --webapp-name cloudsentinel-cspm \
+  --resource-group rg-cloudsentinel \
+  --hostname scans.yourdomain.com
+
+# Bind managed certificate
+az webapp config ssl create \
+  --name cloudsentinel-cspm-ssl \
+  --resource-group rg-cloudsentinel \
+  --webapp-name cloudsentinel-cspm \
+  --hostname scans.yourdomain.com
+
+# Method 3: Azure Blob Storage Static Website (Cheapest)
+Why this one: Literally ~$0.02/month. No compute. Good for internal tools with low traffic.
+# Create storage account
+az storage account create \
+  --name cloudsentinelsa \
+  --resource-group rg-cloudsentinel \
+  --location eastus \
+  --sku Standard_LRS \
+  --kind StorageV2
+
+# Enable static website
+az storage blob service-properties update \
+  --account-name cloudsentinelsa \
+  --static-website \
+  --index-document index.html \
+  --404-document index.html
+
+# Get the static website URL
+az storage account show \
+  --name cloudsentinelsa \
+  --resource-group rg-cloudsentinel \
+  --query "primaryEndpoints.web" \
+  --output tsv
+# Returns: https://cloudsentinelsa.z5.web.core.windows.net/
+
+# Upload files
+az storage blob upload-batch \
+  --destination '$web' \
+  --source ./cloudsentinel/ \
+  --account-name cloudsentinelsa \
+  --overwrite
+
+Note: Blob static sites don't get automatic HTTPS on the z5.web.core.windows.net URL. You need Azure CDN or a custom domain with Front Door for HTTPS.
+
+# Custom Domain Setup (Any Method)
+DNS Configuration
+Add these records at your domain registrar:
+| Type  | Name    | Value                                      |
+|-------|---------|--------------------------------------------|
+| CNAME | `scans` | `cloudsentinel-cspm.azurestaticapps.net`   |
+| TXT   | `asuid.scans` | (get from Azure portal → Custom domains) |
+
+In Azure Portal
+Go to your Static Web App / Web App
+Custom domains → Add
+Enter scans.yourdomain.com
+Azure will validate DNS → click Create
+SSL auto-provisions (free on Static Web Apps)
+
+# Quick-Start Cheat Sheet (Method 1, All CLI)
+# 1. Create repo and push
+cd cloudsentinel && git init && git add . && git commit -m "init"
+gh repo create cloudsentinel --public --push --source=.
+
+# 2. One command to deploy
+az login
+az group create --name rg-cloudsentinel --location eastus
+az staticwebapp create \
+  --name cloudsentinel-cspm \
+  --resource-group rg-cloudsentinel \
+  --source https://github.com/YOUR_USER/cloudsentinel \
+  --branch main \
+  --sku Free \
+  --app-location "/" \
+  --output-location "/"
+
+# 3. Get URL
+az staticwebapp show -n cloudsentinel-cspm -g rg-cloudsentinel \
+  --query defaultHostname -o tsv
+
+  That's it. Three commands, zero cost, globally distributed, HTTPS enabled.
