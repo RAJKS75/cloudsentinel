@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudSentinel — Cloud Security Posture Scanner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .display-font { font-family: 'Space Grotesk', sans-serif; }
+    .mono-font { font-family: 'JetBrains Mono', monospace; }
+    ::selection { background: #D4F02E; color: #0A2218; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    @keyframes scanPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    @keyframes scanLine {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+    @keyframes progressBar {
+      from { width: 0%; }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes countUp {
+      from { opacity: 0; transform: scale(0.8); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes radarSweep {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .animate-scan-pulse { animation: scanPulse 1.5s ease-in-out infinite; }
+    .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
+    .animate-blink { animation: blink 1s step-end infinite; }
+    .animate-radar { animation: radarSweep 3s linear infinite; }
+
+    .scan-line-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #D4F02E, transparent);
+      animation: scanLine 2s linear infinite;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .severity-critical { background: #DC2626; color: white; }
+    .severity-high { background: #EA580C; color: white; }
+    .severity-medium { background: #D97706; color: white; }
+    .severity-low { background: #2563EB; color: white; }
+    .severity-info { background: #6B7280; color: white; }
+
+    .compliance-ring {
+      transition: stroke-dashoffset 1.5s ease-out;
+    }
+
+    .finding-row:hover { background: rgba(212, 240, 46, 0.05); }
+
+    .tab-active {
+      background: #D4F02E;
+      color: #0A2218;
+    }
+
+    .framework-badge-nist { background: #1E3A5F; color: #93C5FD; border: 1px solid #2563EB33; }
+    .framework-badge-iso { background: #1A3C34; color: #6EE7B7; border: 1px solid #10B98133; }
+    .framework-badge-cis { background: #3B1F2B; color: #F9A8D4; border: 1px solid #EC489933; }
+    .framework-badge-ccm { background: #3B2F1F; color: #FCD34D; border: 1px solid #F59E0B33; }
+
+    .resource-row { transition: all 150ms; }
+    .resource-row:hover { background: rgba(243, 240, 230, 0.03); }
+
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white !important; color: black !important; }
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { bg: '#F3F0E6', dark: '#0A2218', accent: '#D4F02E', green: '#8FB339' },
+            sec: { critical: '#DC2626', high: '#EA580C', medium: '#D97706', low: '#2563EB', info: '#6B7280', pass: '#10B981', fail: '#EF4444' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-brand-dark text-brand-bg min-h-screen">
+
+  <!-- TOP BAR -->
+  <div class="bg-black/40 border-b border-brand-bg/10">
+    <div class="max-w-[1600px] mx-auto px-4 md:px-6 py-1.5 flex items-center justify-between">
+      <div class="flex items-center gap-4 text-[10px] text-brand-bg/40 uppercase tracking-widest font-semibold">
+        <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 bg-sec-pass rounded-full"></span> System Operational</span>
+        <span class="hidden md:inline">|</span>
+        <span class="hidden md:inline">Engine v3.2.1</span>
+        <span class="hidden md:inline">|</span>
+        <span class="hidden md:inline" id="currentTime"></span>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick="window.print()" class="text-[10px] text-brand-bg/40 hover:text-brand-accent uppercase tracking-widest font-semibold flex items-center gap-1 transition-colors no-print">
+          <i data-lucide="printer" class="w-3 h-3"></i> Export
+        </button>
+        <button class="text-[10px] text-brand-bg/40 hover:text-brand-accent uppercase tracking-widest font-semibold flex items-center gap-1 transition-colors no-print">
+          <i data-lucide="settings" class="w-3 h-3"></i> Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HEADER / NAV -->
+  <header class="sticky top-0 z-50 bg-brand-dark/95 backdrop-blur-md border-b border-brand-bg/10">
+    <div class="max-w-[1600px] mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-brand-accent flex items-center justify-center">
+          <i data-lucide="shield-check" class="w-5 h-5 text-brand-dark"></i>
+        </div>
+        <div>
+          <h1 class="display-font text-lg font-bold tracking-tighter leading-none">CloudSentinel</h1>
+          <p class="text-[9px] text-brand-bg/40 uppercase tracking-widest font-semibold">CSPM · Vulnerability · Compliance</p>
+        </div>
+      </div>
+
+      <div class="hidden lg:flex items-center gap-1 bg-brand-bg/5 rounded-lg p-1">
+        <button class="nav-tab tab-active text-[10px] font-bold uppercase tracking-wider px-4 py-2 rounded-md transition-all" data-tab="dashboard">Dashboard</button>
+        <button class="nav-tab text-[10px] font-bold uppercase tracking-wider px-4 py-2 rounded-md text-brand-bg/50 hover:text-brand-bg transition-all" data-tab="findings">Findings</button>
+        <button class="nav-tab text-[10px] font-bold uppercase tracking-wider px-4 py-2 rounded-md text-brand-bg/50 hover:text-brand-bg transition-all" data-tab="resources">Resources</button>
+        <button class="nav-tab text-[10px] font-bold uppercase tracking-wider px-4 py-2 rounded-md text-brand-bg/50 hover:text-brand-bg transition-all" data-tab="compliance">Compliance</button>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div class="hidden md:flex items-center gap-2 bg-brand-bg/5 rounded-lg px-3 py-2">
+          <i data-lucide="search" class="w-3.5 h-3.5 text-brand-bg/40"></i>
+          <input type="text" placeholder="Search findings..." class="bg-transparent text-xs text-brand-bg placeholder:text-brand-bg/30 outline-none w-40" id="globalSearch">
+        </div>
+        <button class="relative p-2 rounded-lg hover:bg-brand-bg/5 transition-colors">
+          <i data-lucide="bell" class="w-4 h-4 text-brand-bg/60"></i>
+          <span class="absolute top-1 right-1 w-2 h-2 bg-sec-critical rounded-full"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main class="max-w-[1600px] mx-auto px-4 md:px-6 py-6">
+
+    <!-- ===================== SCAN CONFIG PANEL ===================== -->
+    <div id="scanPanel" class="mb-6">
+      <div class="bg-brand-bg/5 border border-brand-bg/10 rounded-2xl p-6">
+        <div class="flex flex-col lg:flex-row lg:items-end gap-6">
+          <!-- Cloud Provider -->
+          <div class="flex-1">
+            <label class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 mb-2 block">Cloud Provider</label>
+            <div class="flex gap-2">
+              <button class="provider-btn flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-brand-accent bg-brand-accent/10 text-brand-accent text-xs font-bold transition-all" data-provider="aws">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M6.763 10.036c0 .296.032.535.088.71.064.176.144.368.256.576.04.063.056.127.056.183 0 .08-.048.16-.152.24l-.503.335a.383.383 0 01-.208.072c-.08 0-.16-.04-.239-.112a2.47 2.47 0 01-.287-.375 6.18 6.18 0 01-.248-.471c-.622.734-1.405 1.101-2.347 1.101-.67 0-1.205-.191-1.596-.574-.391-.384-.59-.894-.59-1.533 0-.678.239-1.23.726-1.644.487-.415 1.133-.623 1.955-.623.272 0 .551.024.846.064.296.04.6.104.918.176v-.583c0-.607-.127-1.03-.375-1.277-.255-.248-.686-.367-1.3-.367-.28 0-.568.031-.863.103-.296.072-.583.16-.863.272a2.287 2.287 0 01-.28.104.488.488 0 01-.127.023c-.112 0-.168-.08-.168-.247v-.391c0-.128.016-.224.056-.28a.597.597 0 01.224-.167c.279-.144.614-.264 1.005-.36a4.84 4.84 0 011.246-.151c.95 0 1.644.216 2.091.647.439.43.662 1.085.662 1.963v2.586zm-3.24 1.214c.263 0 .534-.048.822-.144.287-.096.543-.271.762-.519.128-.152.224-.32.272-.512.047-.191.08-.423.08-.694v-.335a6.66 6.66 0 00-.735-.136 6.02 6.02 0 00-.75-.048c-.535 0-.926.104-1.19.32-.263.215-.39.518-.39.917 0 .375.095.654.295.846.191.2.47.296.834.296zm6.41.862c-.144 0-.24-.024-.304-.08-.064-.048-.12-.16-.168-.311L7.586 5.55a1.398 1.398 0 01-.072-.32c0-.128.064-.2.191-.2h.783c.151 0 .255.025.31.08.065.048.113.16.16.312l1.342 5.284 1.245-5.284c.04-.16.088-.264.151-.312a.549.549 0 01.32-.08h.638c.152 0 .256.025.32.08.063.048.12.16.151.312l1.261 5.348 1.381-5.348c.048-.16.104-.264.16-.312a.52.52 0 01.311-.08h.743c.128 0 .2.064.2.2 0 .04-.009.08-.017.128a1.137 1.137 0 01-.056.2l-1.923 6.17c-.048.16-.104.263-.168.311a.51.51 0 01-.303.08h-.687c-.151 0-.255-.024-.32-.08-.063-.056-.119-.16-.15-.32l-1.238-5.148-1.23 5.14c-.04.16-.087.272-.15.328-.065.048-.177.08-.32.08zm10.256.215c-.415 0-.83-.048-1.229-.143-.399-.096-.71-.2-.918-.32-.128-.071-.216-.151-.248-.223a.563.563 0 01-.048-.224v-.407c0-.167.064-.247.183-.247.048 0 .096.008.144.024.048.016.12.048.2.08.271.12.566.215.878.279.319.064.63.096.95.096.502 0 .894-.088 1.165-.264a.86.86 0 00.415-.758.777.777 0 00-.215-.559c-.144-.151-.415-.287-.806-.415l-1.157-.36c-.583-.183-1.014-.454-1.277-.813a1.902 1.902 0 01-.4-1.158c0-.335.073-.63.216-.886.144-.255.335-.479.575-.654.24-.184.51-.32.83-.415a3.48 3.48 0 011.005-.136c.175 0 .359.008.535.032.183.024.35.056.518.088.16.04.312.08.455.127.144.048.256.096.336.144a.69.69 0 01.24.2.43.43 0 01.071.263v.375c0 .168-.064.256-.184.256a.83.83 0 01-.303-.096 3.652 3.652 0 00-1.532-.311c-.455 0-.815.071-1.062.223-.248.152-.375.383-.375.694 0 .224.08.416.24.567.159.152.454.304.877.44l1.134.358c.574.184.99.44 1.237.767.247.327.367.702.367 1.117 0 .343-.072.655-.207.926-.144.272-.336.511-.583.703-.248.2-.543.343-.886.447-.36.111-.734.167-1.142.167z"/><path d="M21.698 16.207c-2.626 1.94-6.442 2.969-9.722 2.969-4.598 0-8.74-1.7-11.87-4.526-.247-.223-.024-.527.271-.351 3.384 1.963 7.559 3.153 11.878 3.153 2.914 0 6.114-.607 9.06-1.852.439-.2.814.287.383.607z" opacity=".7"/><path d="M22.792 14.961c-.336-.43-2.22-.207-3.074-.103-.255.032-.295-.192-.063-.36 1.5-1.053 3.967-.75 4.254-.399.287.36-.08 2.826-1.485 4.007-.216.184-.423.088-.327-.151.32-.79 1.03-2.57.695-2.994z" opacity=".7"/></svg>
+                AWS
+              </button>
+              <button class="provider-btn flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-brand-bg/10 text-brand-bg/40 text-xs font-bold hover:border-brand-bg/30 hover:text-brand-bg/60 transition-all" data-provider="azure">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M5.483 21.3H24L14.025 4.013l-3.03 5.28L5.483 21.3zM0 19.197l4.935-8.542L9.87 19.2H0z"/></svg>
+                Azure
+              </button>
+              <button class="provider-btn flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-brand-bg/10 text-brand-bg/40 text-xs font-bold hover:border-brand-bg/30 hover:text-brand-bg/60 transition-all" data-provider="gcp">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12.001 0a12.019 12.019 0 00-8.508 3.535l3.086 3.086A7.51 7.51 0 0112.001 4.5a7.513 7.513 0 016.875 4.5h4.29A11.97 11.97 0 0012.001 0zm-9.492 5.633A11.953 11.953 0 000 12.001c0 6.627 5.373 12 12.001 12 3.09 0 5.913-1.17 8.048-3.088l-3.086-3.086A7.505 7.505 0 0112.001 19.5a7.513 7.513 0 01-6.875-4.5H.834a11.97 11.97 0 001.675 4.633l-3.086 3.086A11.96 11.96 0 0012.001 24c6.628 0 12.001-5.373 12.001-12.001S18.629 0 12.001 0a11.96 11.96 0 00-9.492 5.633z"/></svg>
+                GCP
+              </button>
+            </div>
+          </div>
+
+          <!-- Subscription / Project -->
+          <div class="flex-1">
+            <label class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 mb-2 block">Subscription / Project</label>
+            <select id="subscriptionSelect" class="w-full bg-brand-bg/5 border border-brand-bg/10 rounded-xl px-4 py-3 text-xs text-brand-bg appearance-none cursor-pointer focus:outline-none focus:border-brand-accent/50">
+              <option value="all">All Subscriptions (3)</option>
+              <option value="prod">prod-subscription-001</option>
+              <option value="staging">staging-subscription-002</option>
+              <option value="dev">dev-subscription-003</option>
+            </select>
+          </div>
+
+          <!-- Scan Scope -->
+          <div class="flex-1">
+            <label class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 mb-2 block">Scan Scope</label>
+            <select id="scopeSelect" class="w-full bg-brand-bg/5 border border-brand-bg/10 rounded-xl px-4 py-3 text-xs text-brand-bg appearance-none cursor-pointer focus:outline-none focus:border-brand-accent/50">
+              <option value="full">Full Scan (All Services)</option>
+              <option value="compute">Compute Only</option>
+              <option value="storage">Storage & Databases</option>
+              <option value="network">Network & Security</option>
+              <option value="identity">Identity & Access</option>
+            </select>
+          </div>
+
+          <!-- Scan Button -->
+          <div class="flex-shrink-0">
+            <label class="text-[10px] font-bold uppercase tracking-widest text-transparent mb-2 block">Action</label>
+            <button id="scanBtn" onclick="startScan()" class="bg-brand-accent text-brand-dark px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-brand-accent/90 transition-all flex items-center gap-2 shadow-[3px_3px_0px_0px_rgba(212,240,46,0.3)] hover:shadow-[4px_4px_0px_0px_rgba(212,240,46,0.4)] hover:-translate-y-0.5">
+              <i data-lucide="radar" class="w-4 h-4"></i>
+              Start Scan
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCAN PROGRESS ===================== -->
+    <div id="scanProgress" class="hidden mb-6">
+      <div class="bg-brand-bg/5 border border-brand-accent/30 rounded-2xl p-6 relative overflow-hidden">
+        <div class="scan-line-overlay"></div>
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-3 h-3 bg-brand-accent rounded-full animate-scan-pulse"></div>
+          <span class="display-font font-bold text-sm" id="scanStatusText">Initializing scan engine...</span>
+          <span class="ml-auto mono-font text-xs text-brand-accent" id="scanPercent">0%</span>
+        </div>
+        <div class="w-full h-2 bg-brand-bg/10 rounded-full overflow-hidden">
+          <div id="scanBar" class="h-full bg-gradient-to-r from-brand-accent to-brand-green rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <div class="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3" id="scanSteps">
+          <div class="scan-step flex items-center gap-2 text-[10px] text-brand-bg/30" data-step="0">
+            <i data-lucide="loader" class="w-3 h-3 animate-spin"></i> Discovering resources...
+          </div>
+          <div class="scan-step flex items-center gap-2 text-[10px] text-brand-bg/30" data-step="1">
+            <i data-lucide="circle" class="w-3 h-3"></i> Analyzing configurations...
+          </div>
+          <div class="scan-step flex items-center gap-2 text-[10px] text-brand-bg/30" data-step="2">
+            <i data-lucide="circle" class="w-3 h-3"></i> Checking compliance controls...
+          </div>
+          <div class="scan-step flex items-center gap-2 text-[10px] text-brand-bg/30" data-step="3">
+            <i data-lucide="circle" class="w-3 h-3"></i> Detecting vulnerabilities...
+          </div>
+          <div class="scan-step flex items-center gap-2 text-[10px] text-brand-bg/30" data-step="4">
+            <i data-lucide="circle" class="w-3 h-3"></i> Generating report...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== RESULTS (Hidden until scan completes) ===================== -->
+    <div id="resultsContainer" class="hidden space-y-6">
+
+      <!-- RISK OVERVIEW CARDS -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="bg-brand-bg/5 border border-brand-bg/10 rounded-xl p-4 animate-fade-in" style="animation-delay:0.1s">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">Risk Score</span>
+            <i data-lucide="gauge" class="w-4 h-4 text-sec-critical"></i>
+          </div>
+          <div class="display-font text-3xl font-bold text-sec-critical" id="riskScore">--</div>
+          <div class="text-[10px] text-brand-bg/40 mt-1">out of 100</div>
+        </div>
+        <div class="bg-brand-bg/5 border border-sec-critical/30 rounded-xl p-4 animate-fade-in" style="animation-delay:0.15s">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">Critical</span>
+            <span class="w-2.5 h-2.5 bg-sec-critical rounded-full animate-blink"></span>
+          </div>
+          <div class="display-font text-3xl font-bold text-sec-critical" id="criticalCount">--</div>
+          <div class="text-[10px] text-sec-critical/60 mt-1">Immediate action</div>
+        </div>
+        <div class="bg-brand-bg/5 border border-sec-high/20 rounded-xl p-4 animate-fade-in" style="animation-delay:0.2s">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">High</span>
+            <i data-lucide="alert-triangle" class="w-4 h-4 text-sec-high"></i>
+          </div>
+          <div class="display-font text-3xl font-bold text-sec-high" id="highCount">--</div>
+          <div class="text-[10px] text-sec-high/60 mt-1">Remediate soon</div>
+        </div>
+        <div class="bg-brand-bg/5 border border-brand-bg/10 rounded-xl p-4 animate-fade-in" style="animation-delay:0.25s">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">Medium</span>
+            <i data-lucide="alert-circle" class="w-4 h-4 text-sec-medium"></i>
+          </div>
+          <div class="display-font text-3xl font-bold text-sec-medium" id="mediumCount">--</div>
+          <div class="text-[10px] text-sec-medium/60 mt-1">Plan remediation</div>
+        </div>
+        <div class="bg-brand-bg/5 border border-brand-bg/10 rounded-xl p-4 animate-fade-in" style="animation-delay:0.3s">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">Low / Info</span>
+            <i data-lucide="info" class="w-4 h-4 text-sec-low"></i>
+          </div>
+          <div class="display-font text-3xl font-bold text-sec-low" id="lowCount">--</div>
+          <div class="text-[10px] text-sec-low/60 mt-1">Monitor</div>
+        </div>
+      </div>
+
+      <!-- COMPLIANCE + RESOURCE STATS -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Compliance Scores -->
+        <div class="lg:col-span-2 bg-brand-bg/5 border border-brand-bg/10 rounded-2xl p-6 animate-fade-in" style="animation-delay:0.35s">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="display-font text-lg font-bold tracking-tight">Compliance Posture</h2>
+            <div class="flex gap-2">
+              <span class="framework-badge-nist text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">NIST 800-53</span>
+              <span class="framework-badge-iso text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">ISO 27001</span>
+              <span class="framework-badge-cis text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">CIS</span>
+              <span class="framework-badge-ccm text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">CCM</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-6" id="complianceRings">
+            <!-- NIST -->
+            <div class="text-center">
+              <div class="relative w-28 h-28 mx-auto mb-3">
+                <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(243,240,230,0.05)" stroke-width="8"/>
+                  <circle class="compliance-ring" cx="50" cy="50" r="42" fill="none" stroke="#93C5FD" stroke-width="8" stroke-linecap="round" stroke-dasharray="264" stroke-dashoffset="264" data-target="66"/>
+                </svg>
+                <div class="absolute inset-0 flex items-center justify-center">
+                  <span class="display-font text-2xl font-bold compliance-pct" data-val="74">0%</span>
+                </div>
+              </div>
+              <div class="text-xs font-bold text-brand-bg/60">NIST 800-53</div>
+              <div class="text-[10px] text-brand-bg/30 mt-0.5">142/192 controls</div>
+            </div>
+            <!-- ISO -->
+            <div class="text-center">
+              <div class="relative w-28 h-28 mx-auto mb-3">
+                <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(243,240,230,0.05)" stroke-width="8"/>
+                  <circle class="compliance-ring" cx="50" cy="50" r="42" fill="none" stroke="#6EE7B7" stroke-width="8" stroke-linecap="round" stroke-dasharray="264" stroke-dashoffset="264" data-target="85"/>
+                </svg>
+                <div class="absolute inset-0 flex items-center justify-center">
+                  <span class="display-font text-2xl font-bold compliance-pct" data-val="68">0%</span>
+                </div>
+              </div>
+              <div class="text-xs font-bold text-brand-bg/60">ISO 27001</div>
+              <div class="text-[10px] text-brand-bg/30 mt-0.5">85/125 controls</div>
+            </div>
+            <!-- CIS -->
+            <div class="text-center">
+              <div class="relative w-28 h-28 mx-auto mb-3">
+                <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(243,240,230,0.05)" stroke-width="8"/>
+                  <circle class="compliance-ring" cx="50" cy="50" r="42" fill="none" stroke="#F9A8D4" stroke-width="8" stroke-linecap="round" stroke-dasharray="264" stroke-dashoffset="264" data-target="79"/>
+                </svg>
+                <div class="absolute inset-0 flex items-center justify-center">
+                  <span class="display-font text-2xl font-bold compliance-pct" data-val="70">0%</span>
+                </div>
+              </div>
+              <div class="text-xs font-bold text-brand-bg/60">CIS Benchmarks</div>
+              <div class="text-[10px] text-brand-bg/30 mt-0.5">63/90 controls</div>
+            </div>
+            <!-- CCM -->
+            <div class="text-center">
+              <div class="relative w-28 h-28 mx-auto mb-3">
+                <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(243,240,230,0.05)" stroke-width="8"/>
+                  <circle class="compliance-ring" cx="50" cy="50" r="42" fill="none" stroke="#FCD34D" stroke-width="8" stroke-linecap="round" stroke-dasharray="264" stroke-dashoffset="264" data-target="106"/>
+                </svg>
+                <div class="absolute inset-0 flex items-center justify-center">
+                  <span class="display-font text-2xl font-bold compliance-pct" data-val="60">0%</span>
+                </div>
+              </div>
+              <div class="text-xs font-bold text-brand-bg/60">CSA CCM</div>
+              <div class="text-[10px] text-brand-bg/30 mt-0.5">105/176 controls</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Resource Summary -->
+        <div class="bg-brand-bg/5 border border-brand-bg/10 rounded-2xl p-6 animate-fade-in" style="animation-delay:0.4s">
+          <h2 class="display-font text-lg font-bold tracking-tight mb-4">Resources Scanned</h2>
+          <div class="space-y-3" id="resourceSummary">
+            <div class="flex items-center justify-between py-2 border-b border-brand-bg/5">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-brand-bg/10 flex items-center justify-center"><i data-lucide="server" class="w-4 h-4 text-brand-accent"></i></div>
+                <div><div class="text-xs font-semibold">Compute</div><div class="text-[10px] text-brand-bg/40">EC2, Lambda, EKS</div></div>
+              </div>
+              <span class="mono-font text-sm font-bold" id="resCompute">--</span>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-brand-bg/5">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-brand-bg/10 flex items-center justify-center"><i data-lucide="database" class="w-4 h-4 text-brand-accent"></i></div>
+                <div><div class="text-xs font-semibold">Databases</div><div class="text-[10px] text-brand-bg/40">RDS, DynamoDB, S3</div></div>
+              </div>
+              <span class="mono-font text-sm font-bold" id="resDatabase">--</span>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-brand-bg/5">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-brand-bg/10 flex items-center justify-center"><i data-lucide="network" class="w-4 h-4 text-brand-accent"></i></div>
+                <div><div class="text-xs font-semibold">Network</div><div class="text-[10px] text-brand-bg/40">VPC, SG, NACLs</div></div>
+              </div>
+              <span class="mono-font text-sm font-bold" id="resNetwork">--</span>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-brand-bg/5">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-brand-bg/10 flex items-center justify-center"><i data-lucide="key" class="w-4 h-4 text-brand-accent"></i></div>
+                <div><div class="text-xs font-semibold">Identity</div><div class="text-[10px] text-brand-bg/40">IAM, Roles, Policies</div></div>
+              </div>
+              <span class="mono-font text-sm font-bold" id="resIdentity">--</span>
+            </div>
+            <div class="flex items-center justify-between py-2">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-brand-bg/10 flex items-center justify-center"><i data-lucide="shield" class="w-4 h-4 text-brand-accent"></i></div>
+                <div><div class="text-xs font-semibold">Security</div><div class="text-[10px] text-brand-bg/40">KMS, GuardDuty, Config</div></div>
+              </div>
+              <span class="mono-font text-sm font-bold" id="resSecurity">--</span>
+            </div>
+          </div>
+          <div class="mt-4 pt-4 border-t border-brand-bg/10 flex items-center justify-between">
+            <span class="text-xs font-bold text-brand-bg/40">Total Resources</span>
+            <span class="display-font text-xl font-bold text-brand-accent" id="resTotal">--</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- FILTER BAR -->
+      <div class="bg-brand-bg/5 border border-brand-bg/10 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center gap-3 animate-fade-in no-print" style="animation-delay:0.45s">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">Filter:</span>
+          <button class="filter-sev active text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-brand-bg/10 text-brand-bg border border-brand-bg/10 transition-all" data-severity="all">All</button>
+          <button class="filter-sev text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg text-brand-bg/40 hover:text-brand-bg transition-all" data-severity="critical">Critical</button>
+          <button class="filter-sev text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg text-brand-bg/40 hover:text-brand-bg transition-all" data-severity="high">High</button>
+          <button class="filter-sev text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg text-brand-bg/40 hover:text-brand-bg transition-all" data-severity="medium">Medium</button>
+          <button class="filter-sev text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg text-brand-bg/40 hover:text-brand-bg transition-all" data-severity="low">Low</button>
+        </div>
+        <div class="md:ml-auto flex items-center gap-2">
+          <span class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">Framework:</span>
+          <select id="frameworkFilter" class="bg-brand-bg/5 border border-brand-bg/10 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-brand-bg/60 appearance-none cursor-pointer focus:outline-none focus:border-brand-accent/50">
+            <option value="all">All Frameworks</option>
+            <option value="nist">NIST 800-53</option>
+            <option value="iso">ISO 27001</option>
+            <option value="cis">CIS Benchmarks</option>
+            <option value="ccm">CSA CCM</option>
+          </select>
+          <button onclick="exportCSV()" class="text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg border border-brand-accent/30 text-brand-accent hover:bg-brand-accent/10 transition-all flex items-center gap-1">
+            <i data-lucide="download" class="w-3 h-3"></i> CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- FINDINGS TABLE -->
+      <div class="bg-brand-bg/5 border border-brand-bg/10 rounded-2xl overflow-hidden animate-fade-in" style="animation-delay:0.5s">
+        <div class="overflow-x-auto no-scrollbar">
+          <table class="w-full min-w-[1100px]">
+            <thead>
+              <tr class="border-b border-brand-bg/10">
+                <th class="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 w-8">#</th>
+                <th class="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 w-24">Severity</th>
+                <th class="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-widest text-brand-bg/40">Finding</th>
+                <th class="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 w-40">Resource</th>
+                <th class="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 w-48">Framework Mapping</th>
+                <th class="text-left py-3 px-4 text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 w-20">Status</th>
+              </tr>
+            </thead>
+            <tbody id="findingsTableBody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+        <div class="border-t border-brand-bg/10 px-4 py-3 flex items-center justify-between">
+          <span class="text-[10px] text-brand-bg/30" id="findingsCount">Showing 0 findings</span>
+          <div class="flex items-center gap-1" id="pagination"></div>
+        </div>
+      </div>
+
+      <!-- FINDING DETAIL MODAL -->
+      <div id="detailModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+        <div class="bg-brand-dark border border-brand-bg/10 rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto no-scrollbar shadow-2xl">
+          <div class="sticky top-0 bg-brand-dark border-b border-brand-bg/10 px-6 py-4 flex items-center justify-between">
+            <h3 class="display-font font-bold text-base" id="modalTitle">Finding Detail</h3>
+            <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-brand-bg/10 transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+          </div>
+          <div class="p-6 space-y-5" id="modalBody">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end resultsContainer -->
+
+    <!-- EMPTY STATE -->
+    <div id="emptyState" class="py-20 text-center">
+      <div class="w-24 h-24 rounded-full bg-brand-bg/5 border border-brand-bg/10 flex items-center justify-center mx-auto mb-6">
+        <i data-lucide="shield-check" class="w-10 h-10 text-brand-bg/20"></i>
+      </div>
+      <h2 class="display-font text-2xl font-bold tracking-tighter mb-2 text-brand-bg/40">No Scan Results Yet</h2>
+      <p class="text-sm text-brand-bg/30 max-w-md mx-auto mb-6">Configure your cloud provider and subscription above, then click <strong class="text-brand-accent">Start Scan</strong> to begin security posture assessment.</p>
+      <div class="inline-flex items-center gap-2 text-[10px] text-brand-bg/20 uppercase tracking-widest">
+        <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+        All scans run locally · No data leaves your browser
+      </div>
+    </div>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-brand-bg/5 mt-12">
+    <div class="max-w-[1600px] mx-auto px-4 md:px-6 py-6 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2 text-xs text-brand-bg/30">
+        <i data-lucide="shield-check" class="w-4 h-4 text-brand-accent/50"></i>
+        <span class="display-font font-bold text-brand-bg/40">CloudSentinel</span>
+        <span>· CSPM Engine v3.2.1</span>
+      </div>
+      <div class="text-[10px] text-brand-bg/20 text-center">
+        Simulated scan for demonstration. In production, connects to AWS Config, Azure Policy, GCP Security Command Center via read-only APIs.
+      </div>
+    </div>
+  </footer>
+
+<script>
+// ============================================================
+// SIMULATED SECURITY FINDINGS DATABASE
+// ============================================================
+const FINDINGS_DB = [
+  {
+    id: 1, severity: "critical", status: "open",
+    title: "S3 Bucket with Public Read Access",
+    resource: "s3://prod-data-lake-2024",
+    resourceType: "S3 Bucket",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "S3 bucket 'prod-data-lake-2024' has bucket policy allowing public read access to all objects. This exposes potentially sensitive data including PII, logs, and internal documents to the entire internet.",
+    remediation: "Remove the public access block exemption. Enable 'Block all public access' in bucket settings. Review and remove any bucket policies granting s3:* to Principal: '*'. Implement S3 Access Points for controlled sharing.",
+    impact: "Data exfiltration, compliance violation (GDPR, HIPAA, SOX), reputational damage, regulatory fines up to 4% of annual revenue.",
+    frameworks: [
+      { name: "NIST", id: "AC-3", label: "Access Enforcement" },
+      { name: "ISO", id: "A.9.4", label: "System Access Control" },
+      { name: "CIS", id: "2.1.1", label: "Ensure S3 buckets not publicly accessible" },
+      { name: "CCM", id: "DSM-02", label: "Data Security" }
+    ]
+  },
+  {
+    id: 2, severity: "critical", status: "open",
+    title: "Security Group Allows SSH (Port 22) from 0.0.0.0/0",
+    resource: "sg-0a3b7c8d9e0f (prod-web-sg)",
+    resourceType: "Security Group",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "Security group attached to 5 EC2 instances allows inbound SSH access from any IP address (0.0.0.0/0). This exposes instances to brute-force attacks and unauthorized access attempts.",
+    remediation: "Replace 0.0.0.0/0 source with a specific CIDR range (VPN, bastion host IP). Implement AWS Systems Manager Session Manager for SSH access without inbound rules. Enable port knocking or fail2ban.",
+    impact: "Unauthorized server access, ransomware deployment, lateral movement, data breach.",
+    frameworks: [
+      { name: "NIST", id: "SC-7", label: "Boundary Protection" },
+      { name: "ISO", id: "A.13.1", label: "Network Security" },
+      { name: "CIS", id: "4.1", label: "No security groups allow ingress from 0.0.0.0/0 to port 22" },
+      { name: "CCM", id: "TVM-01", label: "Threat & Vulnerability Mgmt" }
+    ]
+  },
+  {
+    id: 3, severity: "critical", status: "open",
+    title: "IAM Root Account Has Active Access Keys",
+    resource: "arn:aws:iam::123456789012:root",
+    resourceType: "IAM User",
+    region: "global",
+    subscription: "prod-subscription-001",
+    description: "The root account has 2 active access keys. Root account should never be used for day-to-day operations. This violates AWS best practices and multiple compliance frameworks.",
+    remediation: "Delete all root access keys immediately. Create individual IAM users with least-privilege policies. Enable MFA on root account. Use AWS Organizations for delegated access.",
+    impact: "Full account takeover, unrestricted access to all resources, no audit trail, compliance failure.",
+    frameworks: [
+      { name: "NIST", id: "AC-2", label: "Account Management" },
+      { name: "ISO", id: "A.9.2", label: "User Access Management" },
+      { name: "CIS", id: "1.1", label: "Avoid use of root account" },
+      { name: "CCM", id: "IAM-01", label: "Identity & Access Mgmt" }
+    ]
+  },
+  {
+    id: 4, severity: "critical", status: "open",
+    title: "RDS Instance with Public Accessibility Enabled",
+    resource: "prod-postgres-master.c7xk9.us-east-1.rds.amazonaws.com",
+    resourceType: "RDS Instance",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "PostgreSQL RDS instance 'prod-postgres-master' is publicly accessible and not in a private subnet. Database contains customer PII, financial records, and application data.",
+    remediation: "Set PubliclyAccessible to false. Move RDS instance to a private subnet. Use VPC endpoints or bastion host for admin access. Enable RDS Enhanced Monitoring and encryption at rest.",
+    impact: "Direct database access from internet, data exfiltration, SQL injection attacks, compliance violation.",
+    frameworks: [
+      { name: "NIST", id: "SC-8", label: "Transmission Confidentiality" },
+      { name: "ISO", id: "A.10.1", label: "Cryptographic Controls" },
+      { name: "CIS", id: "3.4", label: "Ensure RDS instances not publicly accessible" },
+      { name: "CCM", id: "DSM-01", label: "Data Classification" }
+    ]
+  },
+  {
+    id: 5, severity: "high", status: "open",
+    title: "CloudTrail Logging Not Enabled in All Regions",
+    resource: "us-west-2, eu-west-1, ap-south-1",
+    resourceType: "CloudTrail",
+    region: "multi-region",
+    subscription: "prod-subscription-001",
+    description: "CloudTrail is only enabled in us-east-1. API calls in us-west-2, eu-west-1, and ap-south-1 are not being logged, creating blind spots for security monitoring and incident response.",
+    remediation: "Enable CloudTrail in all regions with multi-region trail configuration. Enable log file validation. Send logs to CloudWatch Logs for real-time alerting. Integrate with SIEM.",
+    impact: "Undetected malicious activity, no forensic trail, failed incident response, compliance audit failure.",
+    frameworks: [
+      { name: "NIST", id: "AU-2", label: "Audit Events" },
+      { name: "ISO", id: "A.12.4", label: "Logging and Monitoring" },
+      { name: "CIS", id: "3.1", label: "Ensure CloudTrail is enabled in all regions" },
+      { name: "CCM", id: "EKM-02", label: "Event Monitoring" }
+    ]
+  },
+  {
+    id: 6, severity: "high", status: "open",
+    title: "IAM Policy Allows Full Administrative Privileges (*:*)",
+    resource: "arn:aws:iam::123456789012:policy/DevTeamFullAccess",
+    resourceType: "IAM Policy",
+    region: "global",
+    subscription: "prod-subscription-001",
+    description: "Custom IAM policy 'DevTeamFullAccess' grants Effect: Allow on Resource: * with Action: '*'. This policy is attached to 12 IAM users and 3 roles, violating least-privilege principle.",
+    remediation: "Replace with specific permissions per service. Use AWS IAM Access Analyzer to identify unused permissions. Implement permission boundaries. Create scoped-down policies for each job function.",
+    impact: "Privilege escalation, unauthorized resource modification, data deletion, lateral movement.",
+    frameworks: [
+      { name: "NIST", id: "AC-6", label: "Least Privilege" },
+      { name: "ISO", id: "A.9.1", label: "Business Requirements of Access Control" },
+      { name: "CIS", id: "1.16", label: "Ensure no policies allow full '*' administrative privileges" },
+      { name: "CCM", id: "IAM-02", label: "Registration & Identity Proofing" }
+    ]
+  },
+  {
+    id: 7, severity: "high", status: "open",
+    title: "Encryption at Rest Not Enabled on EBS Volumes",
+    resource: "vol-0a1b2c3d4e5f (12 volumes)",
+    resourceType: "EBS Volume",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "12 EBS volumes across 8 EC2 instances do not have encryption enabled. These volumes contain application code, configuration files, and cached sensitive data.",
+    remediation: "Enable default EBS encryption in the AWS account settings. Create snapshots of existing volumes, create new encrypted volumes from snapshots, and attach to instances during maintenance window.",
+    impact: "Data exposure if volumes are leaked or improperly disposed, compliance violation, forensic data recovery risk.",
+    frameworks: [
+      { name: "NIST", id: "SC-28", label: "Protection of Information at Rest" },
+      { name: "ISO", id: "A.10.1", label: "Cryptographic Controls" },
+      { name: "CIS", id: "2.2.1", label: "Ensure EBS encryption is enabled" },
+      { name: "CCM", id: "DSM-02", label: "Data Security" }
+    ]
+  },
+  {
+    id: 8, severity: "high", status: "open",
+    title: "VPC Flow Logs Not Enabled",
+    resource: "vpc-0f1e2d3c4b5a (prod-vpc)",
+    resourceType: "VPC",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "Production VPC does not have VPC Flow Logs enabled. Network-level traffic cannot be monitored for anomalous patterns, data exfiltration, or unauthorized communication.",
+    remediation: "Enable VPC Flow Logs with destination to CloudWatch Logs or S3. Set filter to 'All' (reject + accept). Integrate with threat detection tools like GuardDuty.",
+    impact: "No network visibility, undetected data exfiltration, failed intrusion detection, compliance gap.",
+    frameworks: [
+      { name: "NIST", id: "AU-12", label: "Audit Logging" },
+      { name: "ISO", id: "A.12.4", label: "Logging and Monitoring" },
+      { name: "CIS", id: "5.1", label: "Ensure VPC Flow Logs are enabled" },
+      { name: "CCM", id: "EKM-02", label: "Event Monitoring" }
+    ]
+  },
+  {
+    id: 9, severity: "high", status: "suppressed",
+    title: "Lambda Function Without VPC Configuration",
+    resource: "lambda://data-processor-prod",
+    resourceType: "Lambda Function",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "Lambda function 'data-processor-prod' runs in the default VPC with direct internet access. It processes PII data and connects to RDS, but traffic between Lambda and RDS traverses the public internet.",
+    remediation: "Configure Lambda to run inside the production VPC with appropriate security groups. Use VPC endpoints for AWS service calls. Remove internet-facing configuration.",
+    impact: "Man-in-the-middle attacks on database connections, data interception, compliance violation.",
+    frameworks: [
+      { name: "NIST", id: "SC-7", label: "Boundary Protection" },
+      { name: "ISO", id: "A.13.1", label: "Network Security" },
+      { name: "CIS", id: "4.8", label: "Ensure Lambda functions are VPC-configured" },
+      { name: "CCM", id: "TVM-02", label: "Vulnerability, Threat & Risk Mgmt" }
+    ]
+  },
+  {
+    id: 10, severity: "medium", status: "open",
+    title: "KMS Key Rotation Not Enabled",
+    resource: "arn:aws:kms:us-east-1:123456789012:key/1a2b3c4d",
+    resourceType: "KMS Key",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "Customer-managed KMS key used for S3 and RDS encryption has automatic key rotation disabled. The key has not been rotated in 420 days.",
+    remediation: "Enable automatic annual key rotation in KMS console. For keys that don't support automatic rotation, implement a manual rotation process using an alias to switch to a new key.",
+    impact: "Extended key compromise window, compliance violation, increased blast radius if key is exposed.",
+    frameworks: [
+      { name: "NIST", id: "SC-12", label: "Cryptographic Key Establishment" },
+      { name: "ISO", id: "A.10.3", label: "Key Management" },
+      { name: "CIS", id: "2.8", label: "Ensure KMS key rotation is enabled" },
+      { name: "CCM", id: "KMN-01", label: "Key Management" }
+    ]
+  },
+  {
+    id: 11, severity: "medium", status: "open",
+    title: "Security Groups Allow Inbound ICMP from Anywhere",
+    resource: "sg-1a2b3c4d (prod-app-sg, prod-db-sg)",
+    resourceType: "Security Group",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "2 security groups allow inbound ICMP (ping) from 0.0.0.0/0. This enables network reconnaissance, host discovery, and information disclosure to attackers.",
+    remediation: "Remove ICMP rules from 0.0.0.0/0. If ICMP monitoring is needed, restrict to specific monitoring IPs or use VPC-level monitoring tools instead.",
+    impact: "Network footprint disclosure, host enumeration, side-channel information leakage.",
+    frameworks: [
+      { name: "NIST", id: "SC-7", label: "Boundary Protection" },
+      { name: "ISO", id: "A.13.1", label: "Network Security" },
+      { name: "CIS", id: "4.2", label: "No security groups allow ingress from 0.0.0.0/0 to port -1" },
+      { name: "CCM", id: "TVM-01", label: "Threat & Vulnerability Mgmt" }
+    ]
+  },
+  {
+    id: 12, severity: "medium", status: "open",
+    title: "IAM Password Policy Does Not Enforce Minimum Length of 14",
+    resource: "Account Password Policy",
+    resourceType: "IAM Policy",
+    region: "global",
+    subscription: "prod-subscription-001",
+    description: "IAM password policy allows minimum password length of 8 characters. Best practice and compliance frameworks require minimum 14 characters.",
+    remediation: "Update IAM password policy: MinimumPasswordLength=14, RequireUppercase=true, RequireLowercase=true, RequireNumbers=true, RequireSymbols=true, MaxPasswordAge=90, PasswordReusePrevention=24.",
+    impact: "Weak passwords susceptible to brute-force and credential stuffing attacks.",
+    frameworks: [
+      { name: "NIST", id: "IA-5", label: "Identifier & Authenticator Management" },
+      { name: "ISO", id: "A.9.4", label: "System Access Control" },
+      { name: "CIS", id: "1.10", label: "Ensure password policy requires minimum length 14" },
+      { name: "CCM", id: "IAM-01", label: "Identity & Access Mgmt" }
+    ]
+  },
+  {
+    id: 13, severity: "medium", status: "acknowledged",
+    title: "S3 Bucket Versioning Not Enabled",
+    resource: "s3://prod-config-backups",
+    resourceType: "S3 Bucket",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "S3 bucket 'prod-config-backups' does not have versioning enabled. Accidental deletion or overwrite of backup files cannot be recovered.",
+    remediation: "Enable S3 versioning on the bucket. Consider enabling MFA Delete for additional protection. Implement S3 Lifecycle policies to manage non-current versions.",
+    impact: "Irreversible data loss from accidental or malicious deletion, ransomware impact amplification.",
+    frameworks: [
+      { name: "NIST", id: "CP-9", label: "Information System Backup" },
+      { name: "ISO", id: "A.12.3", label: "Backup" },
+      { name: "CIS", id: "2.1.5", label: "Ensure S3 versioning is enabled" },
+      { name: "CCM", id: "DSM-02", label: "Data Security" }
+    ]
+  },
+  {
+    id: 14, severity: "medium", status: "open",
+    title: "No MFA Required for IAM Console Access",
+    resource: "Account Settings",
+    resourceType: "IAM Configuration",
+    region: "global",
+    subscription: "staging-subscription-002",
+    description: "MFA is not required for IAM users accessing the AWS Management Console. 8 IAM users have console access without MFA enforced.",
+    remediation: "Enable 'Require MFA' in account settings. Implement a custom IAM policy that denies all console actions without MFA. Use hardware FIDO2 keys for high-privilege accounts.",
+    impact: "Account takeover via credential phishing, unauthorized console access, privilege escalation.",
+    frameworks: [
+      { name: "NIST", id: "IA-2", label: "User Identification & Authentication" },
+      { name: "ISO", id: "A.9.4", label: "System Access Control" },
+      { name: "CIS", id: "1.13", label: "Ensure MFA is enabled for all IAM users" },
+      { name: "CCM", id: "IAM-03", label: "Access Control" }
+    ]
+  },
+  {
+    id: 15, severity: "low", status: "open",
+    title: "CloudWatch Log Groups Without Retention Policy",
+    resource: "15 log groups in us-east-1",
+    resourceType: "CloudWatch Logs",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "15 CloudWatch Log Groups have no explicit retention policy set, defaulting to 'Never Expire'. This leads to unbounded storage costs and potential compliance issues.",
+    remediation: "Set retention policies based on log type: security logs (365 days), application logs (90 days), access logs (180 days). Use CloudWatch Logs Insights for querying.",
+    impact: "Unnecessary storage costs, potential retention beyond compliance requirements, slower log queries.",
+    frameworks: [
+      { name: "NIST", id: "AU-11", label: "Audit Record Retention" },
+      { name: "ISO", id: "A.12.4", label: "Logging and Monitoring" },
+      { name: "CIS", id: "3.9", label: "Ensure CloudWatch log groups have retention policy" },
+      { name: "CCM", id: "EKM-03", label: "Continuous Monitoring" }
+    ]
+  },
+  {
+    id: 16, severity: "low", status: "open",
+    title: "EC2 Instances Without Name Tags",
+    resource: "7 instances (i-0a1b..., i-0c2d..., ...)",
+    resourceType: "EC2 Instance",
+    region: "us-east-1",
+    subscription: "dev-subscription-003",
+    description: "7 EC2 instances do not have a 'Name' tag, making resource management, cost allocation, and incident response difficult.",
+    remediation: "Implement a tagging policy and enforce via AWS Service Control Policies (SCPs). Use AWS Config rules to detect untagged resources. Use Tag Editor for bulk tagging.",
+    impact: "Operational friction, unclear ownership, cost allocation errors, slower incident response.",
+    frameworks: [
+      { name: "NIST", id: "CM-8", label: "Information System Component Inventory" },
+      { name: "ISO", id: "A.8.1", label: "Inventory of Information Assets" },
+      { name: "CIS", id: "2.4", label: "Ensure EC2 instances have appropriate tags" },
+      { name: "CCM", id: "AMM-02", label: "Asset Management" }
+    ]
+  },
+  {
+    id: 17, severity: "low", status: "acknowledged",
+    title: "AWS Config Not Recording All Resource Types",
+    resource: "AWS Config (us-east-1)",
+    resourceType: "Config Service",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "AWS Config is recording only 42 of 152 supported resource types. Changes to unrecorded resources cannot be tracked for compliance or security purposes.",
+    remediation: "Enable recording for all resource types. Create Config rules for critical security controls. Enable Config Aggregation for multi-account/multi-region view.",
+    impact: "Incomplete compliance evidence, undetected configuration drift, audit gaps.",
+    frameworks: [
+      { name: "NIST", id: "CM-3", label: "Configuration Change Control" },
+      { name: "ISO", id: "A.12.1", label: "Operational Procedures" },
+      { name: "CIS", id: "3.2", label: "Ensure AWS Config is enabled in all regions" },
+      { name: "CCM", id: "CCM-02", label: "Compliance Policy" }
+    ]
+  },
+  {
+    id: 18, severity: "medium", status: "open",
+    title: "Unrestricted Outbound Traffic on Security Groups",
+    resource: "sg-5a6b7c8d (prod-lambda-sg)",
+    resourceType: "Security Group",
+    region: "us-east-1",
+    subscription: "prod-subscription-001",
+    description: "Security group allows all outbound traffic (0.0.0.0/0:0-65535). If the associated Lambda function is compromised, it can exfiltrate data to any external endpoint.",
+    remediation: "Restrict outbound rules to only required destinations (S3 endpoints, RDS endpoints, specific APIs). Use VPC endpoints for AWS services. Implement network ACLs as defense-in-depth.",
+    impact: "Data exfiltration, C2 communication, cryptocurrency mining, unauthorized API calls.",
+    frameworks: [
+      { name: "NIST", id: "SC-7", label: "Boundary Protection" },
+      { name: "ISO", id: "A.13.1", label: "Network Security" },
+      { name: "CIS", id: "4.3", label: "Restrict outbound security group rules" },
+      { name: "CCM", id: "TVM-01", label: "Threat & Vulnerability Mgmt" }
+    ]
+  },
+  {
+    id: 19, severity: "high", status: "open",
+    title: "GuardDuty Not Enabled in us-west-2 and ap-south-1",
+    resource: "GuardDuty (2 regions)",
+    resourceType: "GuardDuty",
+    region: "multi-region",
+    subscription: "prod-subscription-001",
+    description: "Amazon GuardDuty threat detection is not enabled in us-west-2 and ap-south-1 regions. Threats including credential compromise, API abuse, and instance compromise will go undetected in these regions.",
+    remediation: "Enable GuardDuty in all active regions. Enable all detectors (S3, EKS, Lambda, RDS). Integrate findings with Security Hub and ticketing system. Configure automated remediation with EventBridge.",
+    impact: "Undetected threats, no intrusion detection, delayed incident response, compliance gap.",
+    frameworks: [
+      { name: "NIST", id: "SI-4", label: "System Monitoring" },
+      { name: "ISO", id: "A.12.4", label: "Logging and Monitoring" },
+      { name: "CIS", id: "3.11", label: "Ensure GuardDuty is enabled" },
+      { name: "CCM", id: "TVM-03", label: "Vulnerability, Threat & Risk Mgmt" }
+    ]
+  },
+  {
+    id: 20, severity: "low", status: "open",
+    title: "EBS Snapshots Not Encrypted",
+    resource: "snap-1a2b3c4d (23 snapshots)",
+    resourceType: "EBS Snapshot",
+    region: "us-east-1",
+    subscription: "staging-subscription-002",
+    description: "23 EBS snapshots are unencrypted. Snapshots can be shared or made public, exposing data. Copies made from these snapshots will also be unencrypted.",
+    remediation: "Enable default EBS encryption. Create encrypted copies of existing snapshots. Delete unencrypted snapshots after verification. Use snapshot policies for automated encryption.",
+    impact: "Data exposure through shared snapshots, compliance violation, unencrypted DR copies.",
+    frameworks: [
+      { name: "NIST", id: "SC-28", label: "Protection of Information at Rest" },
+      { name: "ISO", id: "A.10.1", label: "Cryptographic Controls" },
+      { name: "CIS", id: "2.2.2", label: "Ensure EBS snapshots are encrypted" },
+      { name: "CCM", id: "DSM-02", label: "Data Security" }
+    ]
+  }
+];
+
+// ============================================================
+// STATE
+// ============================================================
+let currentFindings = [];
+let filteredFindings = [];
+let selectedProvider = 'aws';
+let currentPage = 1;
+const perPage = 8;
+
+// ============================================================
+// PROVIDER SELECTION
+// ============================================================
+document.querySelectorAll('.provider-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.provider-btn').forEach(b => {
+      b.classList.remove('border-brand-accent', 'bg-brand-accent/10', 'text-brand-accent', 'border-2');
+      b.classList.add('border-brand-bg/10', 'text-brand-bg/40', 'border');
+    });
+    btn.classList.remove('border-brand-bg/10', 'text-brand-bg/40', 'border');
+    btn.classList.add('border-brand-accent', 'bg-brand-accent/10', 'text-brand-accent', 'border-2');
+    selectedProvider = btn.dataset.provider;
+
+    // Update subscription options
+    const sel = document.getElementById('subscriptionSelect');
+    if (selectedProvider === 'aws') {
+      sel.innerHTML = `<option value="all">All Subscriptions (3)</option><option value="prod">prod-subscription-001</option><option value="staging">staging-subscription-002</option><option value="dev">dev-subscription-003</option>`;
+    } else if (selectedProvider === 'azure') {
+      sel.innerHTML = `<option value="all">All Subscriptions (2)</option><option value="prod">prod-tenant-001</option><option value="dev">dev-tenant-002</option>`;
+    } else {
+      sel.innerHTML = `<option value="all">All Projects (2)</option><option value="prod">prod-project-001</option><option value="dev">dev-project-002</option>`;
+    }
+  });
+});
+
+// ============================================================
+// SCAN SIMULATION
+// ============================================================
+function startScan() {
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i> Scanning...';
+  lucide.createIcons();
+
+  document.getElementById('scanProgress').classList.remove('hidden');
+  document.getElementById('resultsContainer').classList.add('hidden');
+  document.getElementById('emptyState').classList.add('hidden');
+
+  const steps = document.querySelectorAll('.scan-step');
+  const statusTexts = [
+    'Discovering cloud resources...',
+    'Analyzing configurations and policies...',
+    'Evaluating compliance controls (NIST, ISO, CIS, CCM)...',
+    'Running vulnerability detection rules...',
+    'Aggregating results and generating report...'
+  ];
+
+  let progress = 0;
+  let stepIndex = 0;
+
+  const interval = setInterval(() => {
+    progress += Math.random() * 3 + 0.5;
+    if (progress > 100) progress = 100;
+
+    document.getElementById('scanBar').style.width = progress + '%';
+    document.getElementById('scanPercent').textContent = Math.round(progress) + '%';
+
+    const newStep = Math.min(Math.floor(progress / 20), 4);
+    if (newStep !== stepIndex) {
+      stepIndex = newStep;
+      document.getElementById('scanStatusText').textContent = statusTexts[stepIndex];
+
+      steps.forEach((s, i) => {
+        const icon = s.querySelector('i');
+        if (i < stepIndex) {
+          s.classList.remove('text-brand-bg/30');
+          s.classList.add('text-sec-pass');
+          icon.setAttribute('data-lucide', 'check-circle');
+        } else if (i === stepIndex) {
+          s.classList.remove('text-brand-bg/30');
+          s.classList.add('text-brand-accent');
+          icon.setAttribute('data-lucide', 'loader');
+          icon.classList.add('animate-spin');
+        } else {
+          icon.classList.remove('animate-spin');
+        }
+        lucide.createIcons();
+      });
+    }
+
+    if (progress >= 100) {
+      clearInterval(interval);
+      setTimeout(() => finishScan(), 400);
+    }
+  }, 120);
+}
+
+function finishScan() {
+  document.getElementById('scanProgress').classList.add('hidden');
+  document.getElementById('resultsContainer').classList.remove('hidden');
+  document.getElementById('emptyState').classList.add('hidden');
+
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = false;
+  btn.innerHTML = '<i data-lucide="radar" class="w-4 h-4"></i> Rescan';
+  lucide.createIcons();
+
+  // Populate results
+  currentFindings = [...FINDINGS_DB];
+  filteredFindings = [...currentFindings];
+
+  const subFilter = document.getElementById('subscriptionSelect').value;
+  if (subFilter !== 'all') {
+    filteredFindings = filteredFindings.filter(f => f.subscription.includes(subFilter));
+  }
+
+  populateResults();
+  animateComplianceRings();
+}
+
+// ============================================================
+// POPULATE RESULTS
+// ============================================================
+function populateResults() {
+  const critical = filteredFindings.filter(f => f.severity === 'critical').length;
+  const high = filteredFindings.filter(f => f.severity === 'high').length;
+  const medium = filteredFindings.filter(f => f.severity === 'medium').length;
+  const low = filteredFindings.filter(f => f.severity === 'low').length;
+
+  document.getElementById('riskScore').textContent = Math.min(95, critical * 25 + high * 12 + medium * 5 + low * 2);
+  document.getElementById('criticalCount').textContent = critical;
+  document.getElementById('highCount').textContent = high;
+  document.getElementById('mediumCount').textContent = medium;
+  document.getElementById('lowCount').textContent = low;
+
+  document.getElementById('resCompute').textContent = '47';
+  document.getElementById('resDatabase').textContent = '23';
+  document.getElementById('resNetwork').textContent = '38';
+  document.getElementById('resIdentity').textContent = '156';
+  document.getElementById('resSecurity').textContent = '12';
+  document.getElementById('resTotal').textContent = '276';
+
+  renderFindingsTable();
+}
+
+function renderFindingsTable() {
+  const tbody = document.getElementById('findingsTableBody');
+  const start = (currentPage - 1) * perPage;
+  const pageItems = filteredFindings.slice(start, start + perPage);
+
+  tbody.innerHTML = pageItems.map((f, i) => `
+    <tr class="finding-row border-b border-brand-bg/5 cursor-pointer transition-colors" onclick="openDetail(${f.id})">
+      <td class="py-3 px-4 mono-font text-xs text-brand-bg/30">${start + i + 1}</td>
+      <td class="py-3 px-4">
+        <span class="severity-${f.severity} text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md inline-block">${f.severity}</span>
+      </td>
+      <td class="py-3 px-4">
+        <div class="text-xs font-semibold mb-0.5">${f.title}</div>
+        <div class="text-[10px] text-brand-bg/40 max-w-md truncate">${f.description.substring(0, 80)}...</div>
+      </td>
+      <td class="py-3 px-4">
+        <div class="text-[10px] font-semibold text-brand-accent/80 mono-font truncate max-w-[160px]" title="${f.resource}">${f.resource}</div>
+        <div class="text-[9px] text-brand-bg/30">${f.resourceType} · ${f.region}</div>
+      </td>
+      <td class="py-3 px-4">
+        <div class="flex flex-wrap gap-1">
+          ${f.frameworks.map(fw => {
+            const cls = fw.name === 'NIST' ? 'framework-badge-nist' : fw.name === 'ISO' ? 'framework-badge-iso' : fw.name === 'CIS' ? 'framework-badge-cis' : 'framework-badge-ccm';
+            return `<span class="${cls} text-[8px] font-bold px-2 py-0.5 rounded-md">${fw.name} ${fw.id}</span>`;
+          }).join('')}
+        </div>
+      </td>
+      <td class="py-3 px-4">
+        ${f.status === 'open' ? '<span class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-sec-fail"><span class="w-1.5 h-1.5 bg-sec-fail rounded-full"></span>Open</span>' :
+          f.status === 'suppressed' ? '<span class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-sec-medium"><span class="w-1.5 h-1.5 bg-sec-medium rounded-full"></span>Suppressed</span>' :
+          '<span class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-sec-low"><span class="w-1.5 h-1.5 bg-sec-low rounded-full"></span>Acknowledged</span>'}
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('findingsCount').textContent = `Showing ${start + 1}-${Math.min(start + perPage, filteredFindings.length)} of ${filteredFindings.length} findings`;
+
+  // Pagination
+  const totalPages = Math.ceil(filteredFindings.length / perPage);
+  const pag = document.getElementById('pagination');
+  pag.innerHTML = '';
+  for (let p = 1; p <= totalPages; p++) {
+    const btn = document.createElement('button');
+    btn.textContent = p;
+    btn.className = `w-7 h-7 rounded-md text-[10px] font-bold transition-all ${p === currentPage ? 'bg-brand-accent text-brand-dark' : 'text-brand-bg/40 hover:text-brand-bg hover:bg-brand-bg/10'}`;
+    btn.onclick = () => { currentPage = p; renderFindingsTable(); };
+    pag.appendChild(btn);
+  }
+}
+
+// ============================================================
+// COMPLIANCE RING ANIMATION
+// ============================================================
+function animateComplianceRings() {
+  document.querySelectorAll('.compliance-ring').forEach(ring => {
+    const target = parseInt(ring.dataset.target);
+    setTimeout(() => { ring.style.strokeDashoffset = target; }, 300);
+  });
+
+  document.querySelectorAll('.compliance-pct').forEach(pct => {
+    const target = parseInt(pct.dataset.val);
+    let current = 0;
+    const interval = setInterval(() => {
+      current += 1;
+      if (current > target) { clearInterval(interval); return; }
+      pct.textContent = current + '%';
+    }, 20);
+  });
+}
+
+// ============================================================
+// FILTERING
+// ============================================================
+document.querySelectorAll('.filter-sev').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-sev').forEach(b => {
+      b.classList.remove('active', 'bg-brand-bg/10', 'text-brand-bg', 'border-brand-bg/10');
+      b.classList.add('text-brand-bg/40');
+    });
+    btn.classList.add('active', 'bg-brand-bg/10', 'text-brand-bg', 'border-brand-bg/10');
+    btn.classList.remove('text-brand-bg/40');
+
+    applyFilters();
+  });
+});
+
+document.getElementById('frameworkFilter').addEventListener('change', applyFilters);
+document.getElementById('globalSearch').addEventListener('input', (e) => {
+  if (e.target.value.length > 1) applyFilters();
+});
+
+function applyFilters() {
+  const sevFilter = document.querySelector('.filter-sev.active')?.dataset.severity || 'all';
+  const fwFilter = document.getElementById('frameworkFilter').value;
+  const search = document.getElementById('globalSearch').value.toLowerCase();
+
+  filteredFindings = currentFindings.filter(f => {
+    if (sevFilter !== 'all' && f.severity !== sevFilter) return false;
+    if (fwFilter !== 'all' && !f.frameworks.some(fw => fw.name.toLowerCase().startsWith(fwFilter))) return false;
+    if (search && !f.title.toLowerCase().includes(search) && !f.resource.toLowerCase().includes(search) && !f.description.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  currentPage = 1;
+  populateResults();
+}
+
+// ============================================================
+// DETAIL MODAL
+// ============================================================
+function openDetail(id) {
+  const f = currentFindings.find(x => x.id === id);
+  if (!f) return;
+
+  document.getElementById('modalTitle').textContent = f.title;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="flex items-center gap-3 flex-wrap">
+      <span class="severity-${f.severity} text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg">${f.severity}</span>
+      ${f.status === 'open' ? '<span class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sec-fail bg-sec-fail/10 px-3 py-1.5 rounded-lg"><span class="w-2 h-2 bg-sec-fail rounded-full"></span>Open</span>' :
+        f.status === 'suppressed' ? '<span class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sec-medium bg-sec-medium/10 px-3 py-1.5 rounded-lg"><span class="w-2 h-2 bg-sec-medium rounded-full"></span>Suppressed</span>' :
+        '<span class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sec-low bg-sec-low/10 px-3 py-1.5 rounded-lg"><span class="w-2 h-2 bg-sec-low rounded-full"></span>Acknowledged</span>'}
+    </div>
+
+    <div class="bg-brand-bg/5 rounded-xl p-4 space-y-2">
+      <div class="flex justify-between text-xs"><span class="text-brand-bg/40">Resource</span><span class="mono-font text-brand-accent text-right max-w-[70%] break-all">${f.resource}</span></div>
+      <div class="flex justify-between text-xs"><span class="text-brand-bg/40">Type</span><span>${f.resourceType}</span></div>
+      <div class="flex justify-between text-xs"><span class="text-brand-bg/40">Region</span><span>${f.region}</span></div>
+      <div class="flex justify-between text-xs"><span class="text-brand-bg/40">Subscription</span><span class="mono-font">${f.subscription}</span></div>
+    </div>
+
+    <div>
+      <h4 class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 mb-2">Description</h4>
+      <p class="text-sm text-brand-bg/70 leading-relaxed">${f.description}</p>
+    </div>
+
+    <div>
+      <h4 class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 mb-2">Impact</h4>
+      <p class="text-sm text-sec-critical/80 leading-relaxed">${f.impact}</p>
+    </div>
+
+    <div>
+      <h4 class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 mb-2">Remediation Steps</h4>
+      <div class="bg-sec-pass/5 border border-sec-pass/20 rounded-xl p-4">
+        <p class="text-sm text-brand-bg/80 leading-relaxed">${f.remediation}</p>
+      </div>
+    </div>
+
+    <div>
+      <h4 class="text-[10px] font-bold uppercase tracking-widest text-brand-bg/40 mb-3">Framework Mapping</h4>
+      <div class="space-y-2">
+        ${f.frameworks.map(fw => {
+          const cls = fw.name === 'NIST' ? 'framework-badge-nist' : fw.name === 'ISO' ? 'framework-badge-iso' : fw.name === 'CIS' ? 'framework-badge-cis' : 'framework-badge-ccm';
+          return `<div class="flex items-center gap-3 bg-brand-bg/5 rounded-lg p-3">
+            <span class="${cls} text-[9px] font-bold px-2.5 py-1 rounded-md whitespace-nowrap">${fw.name} ${fw.id}</span>
+            <span class="text-xs text-brand-bg/60">${fw.label}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button onclick="acknowledgeFinding(${f.id})" class="flex-1 bg-brand-bg/10 text-brand-bg px-4 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-brand-bg/20 transition-all flex items-center justify-center gap-2">
+        <i data-lucide="check" class="w-3.5 h-3.5"></i> Acknowledge
+      </button>
+      <button onclick="suppressFinding(${f.id})" class="flex-1 border border-brand-bg/20 text-brand-bg/60 px-4 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-brand-bg/5 transition-all flex items-center justify-center gap-2">
+        <i data-lucide="eye-off" class="w-3.5 h-3.5"></i> Suppress
+      </button>
+      <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-wider text-brand-bg/40 hover:text-brand-bg transition-all">Close</button>
+    </div>
+  `;
+
+  document.getElementById('detailModal').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+function closeModal() {
+  document.getElementById('detailModal').classList.add('hidden');
+}
+
+function acknowledgeFinding(id) {
+  const f = currentFindings.find(x => x.id === id);
+  if (f) f.status = 'acknowledged';
+  applyFilters();
+  closeModal();
+}
+
+function suppressFinding(id) {
+  const f = currentFindings.find(x => x.id === id);
+  if (f) f.status = 'suppressed';
+  applyFilters();
+  closeModal();
+}
+
+// Close modal on backdrop click
+document.getElementById('detailModal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('detailModal')) closeModal();
+});
+
+// Close modal on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ============================================================
+// CSV EXPORT
+// ============================================================
+function exportCSV() {
+  if (filteredFindings.length === 0) return;
+
+  const headers = ['ID', 'Severity', 'Title', 'Resource', 'Resource Type', 'Region', 'Subscription', 'Status', 'Frameworks', 'Description', 'Remediation', 'Impact'];
+  const rows = filteredFindings.map(f => [
+    f.id, f.severity, `"${f.title}"`, `"${f.resource}"`, f.resourceType, f.region, f.subscription, f.status,
+    `"${f.frameworks.map(fw => fw.name + ':' + fw.id).join('; ')}"`,
+    `"${f.description.replace(/"/g, '""')}"`,
+    `"${f.remediation.replace(/"/g, '""')}"`,
+    `"${f.impact.replace(/"/g, '""')}"`
+  ]);
+
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cloudsentinel-report-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// CLOCK
+// ============================================================
+function updateClock() {
+  const now = new Date();
+  document.getElementById('currentTime').textContent = now.toUTCString().replace('GMT', 'UTC');
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ============================================================
+// NAV TABS (visual only — single page app)
+// ============================================================
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.nav-tab').forEach(t => {
+      t.classList.remove('tab-active');
+      t.classList.add('text-brand-bg/50');
+    });
+    tab.classList.add('tab-active');
+    tab.classList.remove('text-brand-bg/50');
+
+    // Scroll to relevant section
+    const tabName = tab.dataset.tab;
+    if (tabName === 'findings' || tabName === 'compliance') {
+      document.getElementById('resultsContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (tabName === 'resources') {
+      document.getElementById('resourceSummary')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+});
+
+// Init icons
+lucide.createIcons();
+</script>
+</body>
+</html>
